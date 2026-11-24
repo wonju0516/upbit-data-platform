@@ -1,0 +1,32 @@
+# 수집 데이터와 실행 중 생기는 파일 (커밋하지 않음)
+data/
+checkpoints/
+spark-warehouse/
+metastore_db/
+mlruns/
+mlartifacts/
+*.jsonl
+*.log
+
+# 개인 메모와 Claude Code 지침 (저장소에 올리지 않음)
+_private/
+CLAUDE.md
+
+# 비밀 값
+.env
+.env.*
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# 편집기·OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
