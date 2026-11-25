@@ -38,6 +38,8 @@ REQUIRED_TRAILERS = {
 }
 # record 커밋에 들어가도 되는 경로 (코드가 섞이면 안 됨)
 RECORD_ALLOWED_PREFIXES = ("experiments/", "notes/", "STATE.md")
+# Dependabot 같은 봇 커밋은 형식 검사에서 뺀다. 사람이 PR에서 내용을 보고 머지한다.
+BOT_EMAIL_SUFFIXES = ("[bot]@users.noreply.github.com",)
 TITLE_RE = re.compile(r"^(?P<type>[a-z]+)\((?P<scope>[a-z]+)\): (?P<subject>.+)$")
 TRAILER_RE = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9-]*): (?P<value>.+)$")
 MAX_TITLE = 72
@@ -131,6 +133,10 @@ def check(message: str, ledger_text: str | None, files: list[str]) -> list[str]:
     return errors
 
 
+def is_bot(author_email: str) -> bool:
+    return author_email.endswith(BOT_EMAIL_SUFFIXES)
+
+
 def _report(errors: list[str], label: str) -> None:
     print(f"[commit-msg] {label}", file=sys.stderr)
     for e in errors:
@@ -142,6 +148,9 @@ def main(argv: list[str]) -> int:
     if len(argv) >= 2 and argv[0] == "--range":
         failed = 0
         for sha in gitutil.rev_list(argv[1]):
+            if is_bot(gitutil.commit_author_email(sha)):
+                print(f"[commit-msg] {sha[:7]} 봇 커밋: 형식 검사 건너뜀")
+                continue
             errs = check(
                 gitutil.commit_message(sha),
                 gitutil.show(f"{sha}:{ledger.LEDGER_PATH}"),

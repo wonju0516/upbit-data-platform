@@ -36,6 +36,10 @@ def commit_files(sha: str) -> list[str]:
     return [p for p in out.decode("utf-8").split("\0") if p]
 
 
+def commit_author_email(sha: str) -> str:
+    return git("log", "-1", "--format=%ae", sha).stdout.decode().strip()
+
+
 def commit_message(sha: str) -> str:
     return git("log", "-1", "--format=%B", sha).stdout.decode("utf-8", errors="replace")
 

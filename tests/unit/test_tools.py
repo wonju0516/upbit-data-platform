@@ -100,6 +100,10 @@ class CommitMsgTest(unittest.TestCase):
     def test_blank_line_after_title(self):
         self.assertTrue(self.ok("docs(docs): 규칙을 고친다\n본문이 바로 붙음"))
 
+    def test_bot_author(self):
+        self.assertTrue(ccm.is_bot("49699333+dependabot[bot]@users.noreply.github.com"))
+        self.assertFalse(ccm.is_bot("21000000+someone@users.noreply.github.com"))
+
     def test_merge_is_allowed(self):
         self.assertEqual(self.ok("Merge pull request #3 from x/y"), [])
 

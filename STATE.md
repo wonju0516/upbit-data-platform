@@ -49,6 +49,7 @@
 | 2026-11-25 | PC GitHub 인증은 저장소 전용 deploy key | 09 문서 9-1절 |
 | 2026-11-25 | 수집 시작 전 설계 결정 D1~D6 확정 | 09 문서 1·2·9-2절 |
 | 2026-11-25 | Python 환경은 WSL venv 하나 (conda 안 씀) | 09 문서 9-1절 |
+| 2026-11-25 | CI 실패 이슈는 브랜치마다 하나, 통과하면 자동으로 닫음. Dependabot 주간 업데이트 PR. 자동 머지 안 함 | 09 문서 9-1절 |
 | 2026-11-25 | 이슈·PR은 에이전트가 묻지 않고 만듦. 저장소가 공개면 매번 묻기 | `docs/RULES.md` 3.1절 |
 | 2026-11-25 | 패키지는 `env/requirements.txt` 하나로 venv·CI·컨테이너가 같이 씀. Java는 Spark 이미지 안, 이미지 버전은 1단계 전에 보안 공지 보고 고정 | 09 문서 9-1절 |
 
@@ -66,6 +67,7 @@
 
 ## 최근 변경
 
+- 2026-11-25 · Claude · CI 실패 이슈 중복 막기·자동 닫기, Dependabot 설정, 봇 커밋 예외(테스트 21개) · 검증은 이 커밋 본문
 - 2026-11-25 · Claude · deploy key로 전환: 원격을 SSH로, 이 저장소 `core.sshCommand`에 키 지정 · `git ls-remote`(7a91e2c)와 `git push --dry-run`(up-to-date) 성공
 - 2026-11-25 · Claude · `.venv`에 websockets 17.4·ruff 0.16.6 설치, SHA-256을 PyPI와 대조(일치) · PC WSL verify.sh 5단계 모두 통과(ruff check·format, 테스트 20개, 원장, 커밋 메시지)
 - 2026-11-25 · Claude · Python 환경을 venv로 확정, RULES 5절·09·STATE 갱신 · PC WSL에서 verify.sh 통과(테스트 20개 OK)

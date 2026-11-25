@@ -1,0 +1,19 @@
+# 패키지와 GitHub Actions의 새 버전·보안 수정을 PR로 받는다 (docs/RULES.md 3.5절).
+# 머지는 사람이 CI 결과를 보고 정한다.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/env"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(env)"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(infra)"
