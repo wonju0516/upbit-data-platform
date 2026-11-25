@@ -5,7 +5,7 @@
 ## 지금
 
 - 마지막 갱신: 2026-11-25
-- 단계: 저장소 규칙 세우기 끝, **0단계(데이터 프로파일링) 착수 전**
+- 단계: 저장소 규칙·Python 환경 준비 끝, **0단계 착수 전**
 - 대상 환경: 집 PC (Windows 11 + WSL2 Ubuntu + Docker Desktop)
 - 주 실행자: Claude Code (원격), 사용자 확인
 
@@ -14,8 +14,8 @@
 | 단계 | ID | 상태 | 완료 조건 | 근거 |
 |---|---|---|---|---|
 | 설계 결정 (수집 전) | P- | 완료 | 09 문서 11.1절 비어 있음 | `docs/09_결정현황.md` |
-| 저장소 규칙·훅·CI | P- | 진행 중 | `verify.sh` 통과, 훅 연결, 첫 `chore(infra)` 커밋 | `docs/RULES.md` |
-| Python 환경 | P- | 대기 | 환경 1개 + 선언 파일, 0단계 패키지 설치 | 열린 질문 Q1 |
+| 저장소 규칙·훅·CI | P- | 완료 | `verify.sh` 통과, 훅 연결, 첫 `chore(infra)` 커밋 | 커밋 6db218d (push 전) |
+| Python 환경 | P- | 완료 | WSL venv + `env/requirements.txt`, 0단계 패키지 설치 | `env/install-20261125.md` |
 | 0 데이터 프로파일링 | P0 | 미착수 | 07 문서 0단계 질문에 원장 기록으로 답함 | `docs/07_단계별실행계획.md` |
 | 1 수집기 → Kafka → Bronze | P1 | 미착수 | 07 문서 1단계 | |
 | 2 Prometheus + Grafana | P2 | 미착수 | | |
@@ -28,15 +28,15 @@
 
 ## 다음 할 일
 
-1. Python 환경 방식 확정(Q1) → 설치 → 환경 선언 파일 커밋
-2. PC GitHub 인증을 deploy key로 전환(사용자 직접) → `gh` 로그아웃
-3. 0단계 이슈 만들기 → `exp/p0-...` 브랜치에서 측정 스크립트 작성 → 원장 기록
+1. PC GitHub 인증을 deploy key로 전환(사용자 직접) → `gh` 로그아웃
+2. 0단계 이슈 만들기 → `exp/p0-...` 브랜치에서 측정 스크립트 작성 → 원장 기록
 
 ## 사람에게 요청한 것
 
 | 날짜 | 요청 | 상태 |
 |---|---|---|
-| 2026-11-25 | Python 환경 방식 선택 (Q1) | 대기 |
+| 2026-11-25 | Python 환경 방식 선택 | 완료 (venv) |
+| 2026-11-25 | WSL에서 `sudo apt install python3-venv` 실행 | 완료 |
 | 2026-11-25 | deploy key 생성·등록 (절차 안내 후) | 대기 |
 | 2026-11-25 | Discord 웹훅 주소 2개를 `.env`에 입력 (2단계 때) | 대기 |
 
@@ -48,12 +48,14 @@
 | 2026-11-25 | 결과가 들어가는 작업은 이슈 → 브랜치 → PR → CI. 문서·환경은 main에 바로 | 09 문서 9-1절 |
 | 2026-11-25 | PC GitHub 인증은 저장소 전용 deploy key | 09 문서 9-1절 |
 | 2026-11-25 | 수집 시작 전 설계 결정 D1~D6 확정 | 09 문서 1·2·9-2절 |
+| 2026-11-25 | Python 환경은 WSL venv 하나 (conda 안 씀) | 09 문서 9-1절 |
+| 2026-11-25 | 패키지는 `env/requirements.txt` 하나로 venv·CI·컨테이너가 같이 씀. Java는 Spark 이미지 안, 이미지 버전은 1단계 전에 보안 공지 보고 고정 | 09 문서 9-1절 |
 
 ## 열린 질문
 
 | # | 정할 것 | 권장 | 막는 것 | 근거 |
 |---|---|---|---|---|
-| Q1 | Python 환경: Miniforge(conda) 또는 apt `python3-venv` | Miniforge | 0단계 측정 스크립트 실행 | WSL에 `ensurepip`·conda 없음 (실측) |
+| - | 없음 | | | |
 
 ## 에이전트 사용
 
@@ -63,5 +65,7 @@
 
 ## 최근 변경
 
+- 2026-11-25 · Claude · `.venv`에 websockets 17.4·ruff 0.16.6 설치, SHA-256을 PyPI와 대조(일치) · PC WSL verify.sh 5단계 모두 통과(ruff check·format, 테스트 20개, 원장, 커밋 메시지)
+- 2026-11-25 · Claude · Python 환경을 venv로 확정, RULES 5절·09·STATE 갱신 · PC WSL에서 verify.sh 통과(테스트 20개 OK)
 - 2026-11-25 · Claude · 저장소 규칙(RULES·AGENTS·STATE·STRUCTURE), 커밋 훅, 원장 도구, `verify.sh`, CI, PR·이슈 템플릿을 만듦 · 검증은 이 커밋의 본문 참고
 - 2026-11-25 · Claude · 설계 결정 문서(01~10)를 09 기준으로 정리하고 GitHub 비공개 저장소에 push

@@ -5,6 +5,10 @@
 set -u
 cd "$(dirname "$0")"
 . .githooks/_python.sh
+# 프로젝트 venv가 있으면 그것을 쓴다 (docs/RULES.md 5절)
+if [ -x .venv/bin/python ]; then PY=.venv/bin/python; fi
+RUFF=""
+if [ -x .venv/bin/ruff ]; then RUFF=.venv/bin/ruff; elif command -v ruff >/dev/null 2>&1; then RUFF=ruff; fi
 if [ -z "$PY" ]; then
   echo "[verify] Python 3.9 이상이 없습니다" >&2
   exit 1
@@ -13,15 +17,15 @@ fail=0
 step() { echo "== $1"; }
 
 step "1/5 린트 (ruff check)"
-if command -v ruff >/dev/null 2>&1; then
-  ruff check tools tests || fail=1
+if [ -n "$RUFF" ]; then
+  "$RUFF" check tools tests || fail=1
 else
-  echo "   ruff 없음: 건너뜀 (환경 준비 전). CI에서는 실행됨"
+  echo "   ruff 없음: 건너뜀 (.venv에 env/requirements.txt 설치 전). CI에서는 실행됨"
 fi
 
 step "2/5 포맷 (ruff format --check)"
-if command -v ruff >/dev/null 2>&1; then
-  ruff format --check tools tests || fail=1
+if [ -n "$RUFF" ]; then
+  "$RUFF" format --check tools tests || fail=1
 else
   echo "   ruff 없음: 건너뜀"
 fi

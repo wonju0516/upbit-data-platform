@@ -129,8 +129,9 @@ scope 목록은 `tools/check_commit_msg.py`, `.githooks/commit-msg`, 이 표 세
 
 ## 5. 환경
 
-- 프로젝트 Python 환경은 하나만 씁니다. 다른 프로젝트 환경은 쓰지도 고치지도 않습니다. 방식은 [09 문서 9-1절](09_결정현황.md)에 있습니다.
-- 인터프리터는 절대경로로 부릅니다. 환경을 켜는 명령(`activate`)에 기대지 않습니다.
+- 프로젝트 Python 환경은 WSL Ubuntu의 venv 하나(`.venv/`, git 밖)만 씁니다. 다른 프로젝트 환경은 쓰지도 고치지도 않습니다. conda 대신 venv를 쓰는 이유는 [09 문서 9-1절](09_결정현황.md)에 있습니다.
+- 패키지 목록은 **`env/requirements.txt` 하나**에 버전까지 고정합니다. venv, CI, 이후 Python 컨테이너 이미지가 모두 이 파일로 설치해서 서로 다른 버전이 섞이지 않게 합니다. 설치: `.venv/bin/python -m pip install -r env/requirements.txt`
+- 인터프리터는 절대경로(`.venv/bin/python`)로 부릅니다. 환경을 켜는 명령(`activate`)에 기대지 않습니다.
 - 패키지를 더하면 같은 커밋에서 환경 선언 파일을 고칩니다(`chore(env):`). 새 패키지는 묻고 더합니다.
 - 설치 파일은 공식 배포처에서만 받고, 받기 전에 이름·크기를 알리고, SHA256을 확인해 기록합니다.
 - 하드웨어 실측은 `env/hw-YYYYMMDD.md`로 남기고, 바뀌면 새 파일을 만듭니다.

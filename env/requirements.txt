@@ -1,0 +1,9 @@
+# 이 프로젝트의 Python 패키지 목록 (하나뿐). 버전은 모두 고정한다.
+# 쓰는 곳: WSL venv(.venv), CI, 이후 수집기 등 Python 컨테이너 이미지.
+# 패키지를 더하면 같은 커밋에서 이 파일을 고친다 (chore(env):, docs/RULES.md 5절).
+
+# 0단계: 업비트 WebSocket 수신
+websockets==17.4
+
+# 검사: verify.sh의 린트·포맷 (CI와 같은 버전)
+ruff==0.16.6
