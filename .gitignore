@@ -7,14 +7,18 @@ mlruns/
 mlartifacts/
 *.jsonl
 *.log
+*.parquet
+*.zip
+*.gz
+lockbox/
 
-# 개인 메모와 Claude Code 지침 (저장소에 올리지 않음)
+# 개인 메모와 이 PC의 환경 정보 (저장소에 올리지 않음)
 _private/
-CLAUDE.md
 
 # 비밀 값
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 

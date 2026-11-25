@@ -1,0 +1,7 @@
+# 도구 설정만 둔다. 패키지 선언이 아님.
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]

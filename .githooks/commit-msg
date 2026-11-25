@@ -1,0 +1,16 @@
+#!/bin/sh
+# 커밋 메시지 검사. 본체는 tools/check_commit_msg.py (docs/RULES.md 3.3절)
+ROOT=$(git rev-parse --show-toplevel)
+. "$ROOT/.githooks/_python.sh"
+if [ -n "$PY" ]; then
+  exec "$PY" "$ROOT/tools/check_commit_msg.py" "$1"
+fi
+# Python이 없을 때: 제목 형식만 본다. scope 목록은 tools/check_commit_msg.py와 같게 유지한다.
+TITLE=$(grep -v '^#' "$1" | sed -n '1p')
+case "$TITLE" in "Merge "*|"fixup! "*|"squash! "*) exit 0 ;; esac
+if printf '%s\n' "$TITLE" | grep -Eq '^(record|fix|upgrade|feat|docs|chore|revert)\((ingest|kafka|bronze|silver|gold|recon|serve|web|monitor|infra|env|docs)\): .*[^.]$'; then
+  echo "[commit-msg] Python이 없어 제목 형식만 검사했습니다" >&2
+  exit 0
+fi
+echo "[commit-msg] 제목 형식은 '<type>(<scope>): <제목>'입니다 (docs/RULES.md 3.3절)" >&2
+exit 1

@@ -22,6 +22,10 @@
 | 아니다 | **온라인 학습**이 아님 (데이터마다 가중치를 갱신하지 않음). 어제 모델에 이어서 학습하지도 않음 |
 | 아니다 | **Continual Learning**(망각 없이 계속 배우는 연구 분야)이 아님 |
 
+## 작업 규칙
+
+진행 상황은 [STATE.md](STATE.md), 저장소 지도는 [STRUCTURE.md](STRUCTURE.md), 커밋·브랜치·측정 기록 규칙은 [docs/RULES.md](docs/RULES.md)에 있습니다.
+
 ## 문서
 
 | 문서 | 내용 |

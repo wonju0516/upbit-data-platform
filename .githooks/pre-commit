@@ -1,0 +1,15 @@
+#!/bin/sh
+# 커밋될 내용 검사. 본체는 tools/pre_commit_check.py (docs/RULES.md 3.4절)
+ROOT=$(git rev-parse --show-toplevel)
+. "$ROOT/.githooks/_python.sh"
+if [ -n "$PY" ]; then
+  exec "$PY" "$ROOT/tools/pre_commit_check.py"
+fi
+# Python이 없을 때: 금지 경로와 .env만 본다.
+BAD=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^(data|_private|checkpoints|lockbox)/|(^|/)\.env(\.[^/]*)?$' | grep -v '\.env\.example$')
+if [ -n "$BAD" ]; then
+  echo "[pre-commit] 커밋 금지 파일: $BAD" >&2
+  exit 1
+fi
+echo "[pre-commit] Python이 없어 경로만 검사했습니다" >&2
+exit 0
