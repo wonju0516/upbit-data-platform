@@ -1,0 +1,116 @@
+# 1단계 인프라: Kafka 브로커 3대 (KRaft, 브로커+컨트롤러 겸용)
+# 값의 근거: docs/09_결정현황.md 2절(Kafka) · 9-1절(이미지 버전, 포트는 127.0.0.1에만)
+#
+#   docker compose -f docker/compose.yml up -d
+#   docker compose -f docker/compose.yml logs kafka-init   # 토픽 만들기 결과
+#
+# 컨테이너 안 주소: kafka-1:19092, kafka-2:19092, kafka-3:19092
+# PC(WSL) 쪽 주소:  localhost:29092, localhost:39092, localhost:49092
+
+x-kafka-image: &kafka-image apache/kafka:4.3.2@sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7
+
+x-kafka-env: &kafka-env
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+  KAFKA_LISTENERS: PLAINTEXT://:19092,CONTROLLER://:9093,PLAINTEXT_HOST://:9092
+  KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  CLUSTER_ID: cO2-u36NQG6hWZ9J_KIjTQ
+  KAFKA_LOG_DIRS: /var/lib/kafka/data
+  # 복제 3벌, 쓰기는 2벌 이상 확인 (브로커 1대가 죽어도 쓰기 계속)
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 2
+  # 토픽은 kafka-init이 미리 만듦. 자동 생성은 끔 (칸 수가 기본값으로 잘못 잡히지 않게)
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_NUM_PARTITIONS: 1
+  # 보관 3일 (09 2절)
+  KAFKA_LOG_RETENTION_HOURS: 72
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  # 브로커당 힙 1GB. 1단계에서 메모리를 재서 조정 (WSL 한도 15GB, 09 9-1절)
+  KAFKA_HEAP_OPTS: -Xms1g -Xmx1g
+
+x-kafka-health: &kafka-health
+  test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 > /dev/null 2>&1"]
+  interval: 15s
+  timeout: 20s
+  retries: 10
+  start_period: 30s
+
+services:
+  # 새 볼륨은 root 소유로 만들어지므로 Kafka 실행 사용자(uid 1000)에게 넘긴다
+  kafka-perms:
+    image: *kafka-image
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown -R 1000:1000 /v1 /v2 /v3"]
+    volumes:
+      - kafka-1-data:/v1
+      - kafka-2-data:/v2
+      - kafka-3-data:/v3
+    restart: "no"
+
+  kafka-1:
+    image: *kafka-image
+    hostname: kafka-1
+    container_name: upbit-kafka-1
+    depends_on:
+      kafka-perms: {condition: service_completed_successfully}
+    ports: ["127.0.0.1:29092:9092"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:19092,PLAINTEXT_HOST://localhost:29092
+    volumes: ["kafka-1-data:/var/lib/kafka/data"]
+    healthcheck: *kafka-health
+    restart: unless-stopped
+
+  kafka-2:
+    image: *kafka-image
+    hostname: kafka-2
+    container_name: upbit-kafka-2
+    depends_on:
+      kafka-perms: {condition: service_completed_successfully}
+    ports: ["127.0.0.1:39092:9092"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:19092,PLAINTEXT_HOST://localhost:39092
+    volumes: ["kafka-2-data:/var/lib/kafka/data"]
+    healthcheck: *kafka-health
+    restart: unless-stopped
+
+  kafka-3:
+    image: *kafka-image
+    hostname: kafka-3
+    container_name: upbit-kafka-3
+    depends_on:
+      kafka-perms: {condition: service_completed_successfully}
+    ports: ["127.0.0.1:49092:9092"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:19092,PLAINTEXT_HOST://localhost:49092
+    volumes: ["kafka-3-data:/var/lib/kafka/data"]
+    healthcheck: *kafka-health
+    restart: unless-stopped
+
+  # 토픽 미리 만들기 (이미 있으면 건너뜀). 끝나면 종료
+  kafka-init:
+    image: *kafka-image
+    depends_on:
+      kafka-1: {condition: service_healthy}
+      kafka-2: {condition: service_healthy}
+      kafka-3: {condition: service_healthy}
+    entrypoint: ["/bin/bash", "/scripts/create-topics.sh"]
+    volumes: ["./kafka/create-topics.sh:/scripts/create-topics.sh:ro"]
+    restart: "no"
+
+volumes:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
