@@ -122,5 +122,30 @@ class TwoCollectorTest(unittest.TestCase):
         self.assertEqual(r["spontaneous_a_overlapping_b_10s"], 1)  # 5초 차이로 겹침
 
 
+class SilenceTest(unittest.TestCase):
+    def test_silence_recorded_over_threshold(self):
+        st = p0.Stats(START)
+        for recv in (START, START + 1000, START + 6000, START + 6500):
+            st.add("orderbook", recv, _raw(code="KRW-BTC", timestamp=recv))
+        self.assertEqual(st.silences["orderbook"], [(START + 1000, START + 6000)])
+        m = st.metrics(["KRW-BTC"], START + 10_000, {k: 0 for k in p0.TYPES})
+        self.assertEqual(m["orderbook_silences"], 1)
+        self.assertEqual(m["orderbook_silent_s"], 5.0)
+
+    def test_overlap_ms(self):
+        self.assertEqual(p0.overlap_ms([(0, 10), (20, 30)], [(5, 25)]), 10)
+        self.assertEqual(p0.overlap_ms([(0, 10)], [(10, 20)]), 0)
+        self.assertEqual(p0.overlap_ms([], [(0, 5)]), 0)
+
+    def test_compare_reports_silence_both(self):
+        a, b = p0.Stats(START), p0.Stats(START)
+        a.silences["orderbook"] = [(START, START + 8000)]
+        b.silences["orderbook"] = [(START + 5000, START + 9000)]
+        r = p0.compare(a, b, START, START + 60_000)
+        self.assertEqual(r["orderbook_silent_s_a"], 8.0)
+        self.assertEqual(r["orderbook_silent_s_b"], 4.0)
+        self.assertEqual(r["orderbook_silent_s_both"], 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()
