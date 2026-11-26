@@ -5,5 +5,8 @@
 # 0단계: 업비트 WebSocket 수신
 websockets==17.4
 
+# 1단계: Kafka 발행 (librdkafka 기반, 2026-10-28 출시, 2주 이상 지난 최신판)
+confluent-kafka==2.16.1
+
 # 검사: verify.sh의 린트·포맷 (CI와 같은 버전)
 ruff==0.16.6
