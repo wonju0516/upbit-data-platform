@@ -11,7 +11,7 @@
 1. [STATE.md](STATE.md) — 지금 어디까지 왔나, 다음 할 일, 열린 질문
 2. [STRUCTURE.md](STRUCTURE.md) — 폴더 지도, 단계별 기준 문서
 3. [docs/09_결정현황.md](docs/09_결정현황.md) — 설계 결정의 기준. 01~08과 다르면 09가 우선
-4. [docs/RULES.md](docs/RULES.md) — 커밋·브랜치·원장·환경 규칙
+4. [docs/RULES.md](docs/RULES.md) — 커밋·원장·환경 규칙
 5. 필요할 때: 04(컬럼), 06(시험), 07(단계 계획), 08(선택 이유), 10(한계)
 
 ## 세션 시작과 끝 (RULES 1절)
@@ -40,7 +40,7 @@ cat _private/LOCAL.md      # 있으면. 이 PC의 실행 환경 (git 밖)
 - 결정이 생기거나 바뀌면 같은 작업 안에서 09를 갱신하고 상태(확정·제안·미정)와 근거를 적습니다. 확정된 결정을 바꾸려면 사용자와 먼저 상의하고 이유를 09와 08에 남깁니다.
 - 한계는 README가 아니라 `docs/10_한계.md`에 모읍니다.
 - 측정 결과는 `experiments/LEDGER.tsv`에 코드로 남깁니다(RULES 4절). 사람이 읽는 요약은 `notes/`에 쓰고 원장 `run_id`를 적습니다.
-- 커밋되는 파일에는 학습 메모, 면접·포트폴리오 코칭 문구, 개인 인프라 정보(IP, 계정, PC 경로)를 넣지 않습니다. 그런 정보는 `_private/`(git 밖)에 둡니다.
+- 커밋되는 파일·커밋 메시지·그림·이슈에는 학습 메모, 면접·포트폴리오 코칭 문구, 개인 정보(IP, 계정 이름, 이메일, PC 경로)를 넣지 않습니다. 저장소가 비공개여도 같습니다. 그런 정보는 `_private/`(git 밖)에 둡니다.
 
 ## 하지 않는 것 (RULES 2절 요지)
 
@@ -60,7 +60,7 @@ cat _private/LOCAL.md      # 있으면. 이 PC의 실행 환경 (git 밖)
 
 ## Git 요지 (RULES 3절)
 
-- 문서·환경 준비 → `main`에 바로 커밋. 측정·코드 → 이슈 → 브랜치 → PR → CI → Merge commit
+- 모든 작업은 `main`에서 (브랜치·PR 없음). 측정은 원장 `git_sha`와 따로 두는 `record` 커밋으로 추적
 - 커밋: `<type>(<scope>): <제목>` + 본문(왜) + 트레일러. 에이전트 커밋은 `Co-Authored-By:`
 - 클론 직후 한 번: `git config core.hooksPath .githooks`
 - 커밋 전: `./verify.sh`

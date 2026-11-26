@@ -4,8 +4,8 @@
 
 ## 지금
 
-- 마지막 갱신: 2026-11-25
-- 단계: 저장소 규칙·Python 환경 준비 끝, **0단계 착수 전**
+- 마지막 갱신: 2026-11-26
+- 단계: 저장소 규칙·Python 환경 준비 끝, **0단계 착수** (이슈 #5)
 - 대상 환경: 집 PC (Windows 11 + WSL2 Ubuntu + Docker Desktop)
 - 주 실행자: Claude Code (원격), 사용자 확인
 
@@ -28,7 +28,8 @@
 
 ## 다음 할 일
 
-1. 0단계 이슈 만들기 → `exp/p0-...` 브랜치에서 측정 스크립트 작성 → 원장 기록
+1. 0단계 (이슈 #5): `main`에서 측정 스크립트 `ingest/p0_profile.py` 작성 → 60초 시험 → 30분 측정 → 원장 기록 → `record` 커밋
+2. Dependabot PR 4개 머지 여부 정하기 (ruff 0.17.6은 나온 지 2주가 안 됨)
 
 ## 사람에게 요청한 것
 
@@ -37,7 +38,7 @@
 | 2026-11-25 | Python 환경 방식 선택 | 완료 (venv) |
 | 2026-11-25 | WSL에서 `sudo apt install python3-venv` 실행 | 완료 |
 | 2026-11-25 | deploy key 생성·등록 | 완료 |
-| 2026-11-25 | PC에서 `gh auth logout` | 대기 |
+| 2026-11-25 | PC에서 `gh auth logout` | 완료 |
 | 2026-11-25 | Discord 웹훅 주소 2개를 `.env`에 입력 (2단계 때) | 대기 |
 
 ## 결정 기록
@@ -51,6 +52,9 @@
 | 2026-11-25 | Python 환경은 WSL venv 하나 (conda 안 씀) | 09 문서 9-1절 |
 | 2026-11-25 | CI 실패 이슈는 브랜치마다 하나, 통과하면 자동으로 닫음. Dependabot 주간 업데이트 PR. 자동 머지 안 함 | 09 문서 9-1절 |
 | 2026-11-25 | 이슈·PR은 에이전트가 묻지 않고 만듦. 저장소가 공개면 매번 묻기 | `docs/RULES.md` 3.1절 |
+| 2026-11-26 | 모든 작업은 `main`에서. 브랜치·PR 안 씀 (Dependabot만 예외). 11-25의 브랜치·PR 규칙을 바꿈 | 09 9-1절, ADR-17 |
+| 2026-11-26 | 저장소가 비공개여도 커밋 메시지·파일·그림·이슈에 개인 정보를 남기지 않음 | 09 9-1절 |
+| 2026-11-26 | 아키텍처 그림은 Excalidraw(Excalifont)로 그려 README에 둠 | 09 9-1절 |
 | 2026-11-25 | 패키지는 `env/requirements.txt` 하나로 venv·CI·컨테이너가 같이 씀. Java는 Spark 이미지 안, 이미지 버전은 1단계 전에 보안 공지 보고 고정 | 09 문서 9-1절 |
 
 ## 열린 질문
@@ -67,6 +71,8 @@
 
 ## 최근 변경
 
+- 2026-11-26 · Claude · Git 규칙을 `main` 하나로 바꿈(RULES v1.1, ADR-17), 개인 정보 기준 강화, 아키텍처 그림(`docs/architecture.svg`·`.excalidraw`)을 README·03에 추가 · 검증은 이 커밋 본문
+- 2026-11-26 · Claude · Dependabot 보안 알림·보안 업데이트 켬(알림 0건), 공개 전 기록 검사(커밋 7개·이슈·PR·CI 로그 14회, 개인 정보 없음), 0단계 이슈 #5 만듦
 - 2026-11-25 · Claude · CI 실패 이슈 중복 막기·자동 닫기, Dependabot 설정, 봇 커밋 예외(테스트 21개) · 검증은 이 커밋 본문
 - 2026-11-25 · Claude · deploy key로 전환: 원격을 SSH로, 이 저장소 `core.sshCommand`에 키 지정 · `git ls-remote`(7a91e2c)와 `git push --dry-run`(up-to-date) 성공
 - 2026-11-25 · Claude · `.venv`에 websockets 17.4·ruff 0.16.6 설치, SHA-256을 PyPI와 대조(일치) · PC WSL verify.sh 5단계 모두 통과(ruff check·format, 테스트 20개, 원장, 커밋 메시지)

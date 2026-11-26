@@ -20,7 +20,7 @@ upbit-data-platform/
 ├── STRUCTURE.md           이 문서
 ├── verify.sh              커밋 전 검사 한 번에
 ├── .env.example           비밀값 이름만 (실제 값은 .env, git 밖)
-├── docs/                  설계 문서 01~10, RULES, LEDGER_SCHEMA
+├── docs/                  설계 문서 01~10, RULES, LEDGER_SCHEMA, 아키텍처 그림(.svg·.excalidraw)
 ├── experiments/LEDGER.tsv 측정 원장 (append-only, 코드가 씀)
 ├── env/                   Python 환경 선언(예정), 하드웨어 실측 hw-YYYYMMDD.md
 ├── tools/                 훅 본체·원장 도구 (Python 표준 라이브러리만)
@@ -61,13 +61,13 @@ upbit-data-platform/
 | `.env`·웹훅 주소·비밀번호가 파일에 없나 | 비밀값 노출 |
 | 측정을 원장(`tools/ledger.py`)으로 남겼나 | 결과의 출처를 증명할 수 없음 |
 | 09와 다른 이름·테이블을 만들지 않았나 | 문서와 코드가 어긋남 |
-| 결과가 있는 작업을 브랜치·PR로 했나 | 결과와 코드 계보가 섞임 |
+| 측정 결과를 `record` 커밋으로 따로 남겼나 | 결과와 코드 계보가 섞임 |
+| 커밋 메시지·파일에 IP·계정·이메일·PC 경로가 없나 | 개인 정보가 기록에 남음 |
 
 ## 이름 규칙
 
 | 대상 | 규칙 | 예 |
 |---|---|---|
-| 브랜치 | `exp/<단계>-<slug>`, `feat/<scope>-<slug>`, `fix/<slug>`, `docs/<slug>` | `exp/p0-orderbook-rate` |
 | 커밋 | `<type>(<scope>): <제목>` | `feat(ingest): 0단계 호가 수집 스크립트를 추가한다` |
 | 측정 ID | `R<YYYYMMDD>-<HHMMSS>-<hex6>` | `R20261126-031500-a1b2c3` |
 | 설계 문서 | `docs/<두 자리 번호>_<이름>.md` | `docs/09_결정현황.md` |
