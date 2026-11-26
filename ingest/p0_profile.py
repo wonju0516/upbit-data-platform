@@ -4,8 +4,11 @@ Kafka·Spark 없이 Python만 쓴다 (docs/07_단계별실행계획.md 0단계, 
 
     .venv/bin/python ingest/p0_profile.py --seconds 60
     .venv/bin/python ingest/p0_profile.py --seconds 1800 --drop-at 900
+    .venv/bin/python ingest/p0_profile.py --seconds 7200 --collectors 2 --drop-at 3600
 
 - 원본: data/p0/<UTC 시각>/<종류>.tsv.gz  (한 줄 = 받은 시각 ms, 탭, 받은 JSON 그대로). git 밖.
+  --collectors 2면 수집기 A·B가 각자 연결 3개로 같은 것을 받고 a/, b/ 아래에 따로 저장한다.
+  --drop-at은 수집기 A만 끊는다 (B가 그 빈틈을 메우는지 보려고).
 - 지표: data/p0/<UTC 시각>/manifest.json, 그리고 원장 experiments/LEDGER.tsv 한 행.
 - 업비트 요청 규칙(docs/09_결정현황.md 9-1절): Origin 헤더 없음, 재연결은 대기 시간을 늘려 가며.
 """
@@ -74,12 +77,24 @@ class Stats:
         self.disconnects: Counter[str] = Counter()
         self.codes: dict[str, set[str]] = defaultdict(set)
         self.levels: Counter[int] = Counter()
-        self.trade_keys: set[tuple[str, int]] = set()
+        self.trade_keys: dict[tuple[str, int], int | None] = {}  # (코드, 체결 번호) → 체결 시각
         self.trade_dups = 0
+        self.events: list[dict] = []  # 끊김 기록
+        self.pending: dict[str, dict] = {}  # 다시 붙은 뒤 첫 메시지를 기다리는 끊김
         self.trade_minutes: dict[str, set[int]] = defaultdict(set)
         self.bad = 0
 
+    def disconnected(self, kind: str, t_ms: int, reason: str) -> None:
+        """끊긴 시각과 이유를 남긴다. 빈틈(gap_ms)은 다시 붙은 뒤 첫 메시지에서 채운다."""
+        self.disconnects[kind] += 1
+        ev = {"kind": kind, "t_ms": t_ms, "reason": reason, "gap_ms": None}
+        self.events.append(ev)
+        self.pending[kind] = ev
+
     def add(self, kind: str, received_ms: int, raw: bytes) -> None:
+        ev = self.pending.pop(kind, None)
+        if ev is not None:
+            ev["gap_ms"] = received_ms - ev["t_ms"]
         self.count[kind] += 1
         self.raw_bytes[kind] += len(raw)
         try:
@@ -101,7 +116,8 @@ class Stats:
             key = (code, msg.get("sequential_id"))
             if key in self.trade_keys:
                 self.trade_dups += 1
-            self.trade_keys.add(key)
+            ts = msg.get("trade_timestamp")
+            self.trade_keys[key] = ts if isinstance(ts, int) else None
             if isinstance(msg.get("trade_timestamp"), int):
                 self.trade_minutes[code].add(msg["trade_timestamp"] // 60000)
 
@@ -142,6 +158,9 @@ class Stats:
             out[f"{k}_latency_ms_min"] = min(lat) if lat else None
             out[f"{k}_snapshots"] = self.snapshots[k]
             out[f"{k}_disconnects"] = self.disconnects[k]
+            out[f"{k}_disconnects_spontaneous"] = sum(
+                1 for e in self.events if e["kind"] == k and e["reason"] != "forced"
+            )
             out[f"{k}_markets_seen"] = len(self.codes[k])
             daily_gz += gz_bytes.get(k, 0) / secs * 86400
         out["est_daily_gb_gzip"] = round(daily_gz / 1e9, 2)
@@ -149,7 +168,56 @@ class Stats:
         out["trade_duplicates"] = self.trade_dups
         out["no_trade_minutes"] = self.no_trade_minutes(codes, end_ms)
         out["bad_json"] = self.bad
+        out["disconnect_events"] = self.events
         return out
+
+
+def compare(a: Stats, b: Stats, start_ms: int, end_ms: int, margin_ms: int = 10_000) -> dict:
+    """수집기 A·B 비교: 한쪽만 받은 체결, 끊김이 겹쳤나, 한쪽 빈틈을 다른 쪽이 메웠나.
+
+    체결은 처음·끝 margin_ms를 뺀 구간(둘 다 확실히 받고 있던 때)의 체결 시각으로 센다.
+    """
+    lo, hi = start_ms + margin_ms, end_ms - margin_ms
+
+    def keys(st: Stats) -> dict:
+        return {k: ts for k, ts in st.trade_keys.items() if ts is not None and lo <= ts < hi}
+
+    ka, kb = keys(a), keys(b)
+    only_a = {k: ka[k] for k in ka.keys() - kb.keys()}
+    only_b = {k: kb[k] for k in kb.keys() - ka.keys()}
+
+    def spont(st: Stats) -> list[dict]:
+        return [e for e in st.events if e["reason"] != "forced"]
+
+    def overlapping(x: list[dict], y: list[dict], within_ms: int = 10_000) -> int:
+        return sum(
+            1
+            for e in x
+            if any(f["kind"] == e["kind"] and abs(f["t_ms"] - e["t_ms"]) <= within_ms for f in y)
+        )
+
+    def covered(gaps: Stats, other_only: dict) -> int:
+        # gaps 쪽 체결 연결이 끊겨 있던 동안 다른 쪽만 받은 체결 수 (앞뒤 2초 여유)
+        n = 0
+        for e in gaps.events:
+            if e["kind"] != "trade" or e["gap_ms"] is None:
+                continue
+            w0, w1 = e["t_ms"] - 2000, e["t_ms"] + e["gap_ms"] + 2000
+            n += sum(1 for ts in other_only.values() if w0 <= ts <= w1)
+        return n
+
+    sa, sb = spont(a), spont(b)
+    return {
+        "trades_both": len(ka.keys() & kb.keys()),
+        "trades_only_a": len(only_a),
+        "trades_only_b": len(only_b),
+        "spontaneous_a": len(sa),
+        "spontaneous_b": len(sb),
+        "spontaneous_a_overlapping_b_10s": overlapping(sa, sb),
+        "spontaneous_b_overlapping_a_10s": overlapping(sb, sa),
+        "trades_covered_by_b_during_a_gaps": covered(a, only_b),
+        "trades_covered_by_a_during_b_gaps": covered(b, only_a),
+    }
 
 
 # ---------- 입출력 ----------
@@ -171,11 +239,10 @@ class _Drop(Exception):
     """--drop-at으로 일부러 끊을 때."""
 
 
-async def collect(kind, codes, stats, deadline, drop_at, gz_files):
+async def collect(kind, codes, stats, deadline, drop_at, f):
     from websockets.asyncio.client import connect
     from websockets.exceptions import WebSocketException
 
-    f = gz_files[kind]
     backoff = 1.0
     dropped = drop_at is None
     while time.monotonic() < deadline:
@@ -199,33 +266,58 @@ async def collect(kind, codes, stats, deadline, drop_at, gz_files):
                     f.write(str(ms).encode() + b"\t" + raw + b"\n")
                     stats.add(kind, ms, raw)
         except (_Drop, WebSocketException, OSError, asyncio.TimeoutError) as e:
-            stats.disconnects[kind] += 1
-            print(f"[{kind}] 끊김: {type(e).__name__}, {backoff:.0f}초 뒤 재연결", flush=True)
+            if isinstance(e, _Drop):
+                reason = "forced"
+            else:
+                code = getattr(getattr(e, "rcvd", None), "code", None)
+                reason = type(e).__name__ + (f":{code}" if code is not None else "")
+            stats.disconnected(kind, time.time_ns() // 1_000_000, reason)
+            print(f"[{kind}] 끊김: {reason}, {backoff:.0f}초 뒤 재연결", flush=True)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
 
 
-async def run(seconds: int, drop_at_s: int | None, out_dir: Path) -> tuple[dict, dict]:
+async def run(
+    seconds: int, drop_at_s: int | None, out_dir: Path, collectors: int = 1
+) -> tuple[dict, dict]:
     codes, clock_offset = fetch_markets()
-    print(f"KRW 마켓 {len(codes)}개, 시계 차이 약 {clock_offset}초", flush=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    gz_files = {k: gzip.open(out_dir / f"{k}.tsv.gz", "wb") for k in TYPES}
+    print(
+        f"KRW 마켓 {len(codes)}개, 수집기 {collectors}대, 시계 차이 약 {clock_offset}초", flush=True
+    )
+    names = ["a", "b"][:collectors]
+    dirs = {"a": out_dir} if collectors == 1 else {n: out_dir / n for n in names}
+    for d in dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+    gz = {(n, k): gzip.open(dirs[n] / f"{k}.tsv.gz", "wb") for n in names for k in TYPES}
     start_ms = time.time_ns() // 1_000_000
-    stats = Stats(start_ms)
+    stats = {n: Stats(start_ms) for n in names}
     t0 = time.monotonic()
     deadline = t0 + seconds
     drop_at = t0 + drop_at_s if drop_at_s is not None else None
     try:
         await asyncio.gather(
-            *(collect(k, codes, stats, deadline, drop_at, gz_files) for k in TYPES)
+            *(
+                collect(k, codes, stats[n], deadline, drop_at if n == "a" else None, gz[n, k])
+                for n in names
+                for k in TYPES
+            )
         )
     finally:
-        for f in gz_files.values():
+        for f in gz.values():
             f.close()
     # 받는 것은 deadline까지만이므로 비율은 설정한 길이로 나눈다 (닫는 대기 시간 제외).
     end_ms = start_ms + seconds * 1000
-    gz_bytes = {k: (out_dir / f"{k}.tsv.gz").stat().st_size for k in TYPES}
-    metrics = stats.metrics(codes, end_ms, gz_bytes)
+
+    def one(n: str) -> dict:
+        gz_bytes = {k: (dirs[n] / f"{k}.tsv.gz").stat().st_size for k in TYPES}
+        return stats[n].metrics(codes, end_ms, gz_bytes)
+
+    if collectors == 1:
+        metrics = one("a")
+    else:
+        metrics = {n: one(n) for n in names}
+        metrics["compare"] = compare(stats["a"], stats["b"], start_ms, end_ms)
+        metrics["markets_subscribed"] = len(codes)
     metrics["clock_offset_s_approx"] = clock_offset
     info = {"codes": codes, "start_ms": start_ms, "end_ms": end_ms}
     return metrics, info
@@ -235,6 +327,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--seconds", type=int, default=60)
     ap.add_argument("--drop-at", type=int, default=None, help="이 초에 연결을 한 번 일부러 끊음")
+    ap.add_argument(
+        "--collectors", type=int, choices=(1, 2), default=1, help="동시에 받을 수집기 수"
+    )
     ap.add_argument("--no-ledger", action="store_true", help="원장에 쓰지 않음 (동작 확인용)")
     a = ap.parse_args(argv)
     if a.drop_at is not None and not 0 < a.drop_at < a.seconds:
@@ -242,15 +337,17 @@ def main(argv: list[str] | None = None) -> int:
 
     started = dt.datetime.now(dt.timezone.utc)
     out_dir = REPO / "data" / "p0" / started.strftime("%Y%m%d-%H%M%S")
-    metrics, info = asyncio.run(run(a.seconds, a.drop_at, out_dir))
+    metrics, info = asyncio.run(run(a.seconds, a.drop_at, out_dir, a.collectors))
 
-    ok = all(metrics[f"{k}_msgs"] > 0 for k in TYPES)
+    per = [metrics] if a.collectors == 1 else [metrics["a"], metrics["b"]]
+    ok = all(m[f"{k}_msgs"] > 0 for m in per for k in TYPES)
     config = {
         "seconds": a.seconds,
         "drop_at": a.drop_at,
         "types": list(TYPES),
         "markets": "KRW-ALL",
         "format": "DEFAULT",
+        "collectors": a.collectors,
     }
     manifest = out_dir / "manifest.json"
     manifest.write_text(
@@ -264,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
     sample = (
         f"KRW 전체 {metrics['markets_subscribed']}개, "
         f"{started:%Y-%m-%dT%H:%MZ}부터 {a.seconds}초"
+        + (f", 수집기 {a.collectors}대 동시" if a.collectors > 1 else "")
         + (f", {a.drop_at}초에 끊기" if a.drop_at is not None else "")
     )
     rid = ledger.append_run(

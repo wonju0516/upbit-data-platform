@@ -87,5 +87,40 @@ class StatsTest(unittest.TestCase):
         json.dumps(m)  # 원장에 JSON으로 들어가야 함
 
 
+def _trade(st, seq, ts, recv=None):
+    st.add("trade", recv or ts, _raw(code="KRW-BTC", sequential_id=seq, trade_timestamp=ts))
+
+
+class TwoCollectorTest(unittest.TestCase):
+    def test_disconnect_gap_filled_by_next_message(self):
+        st = p0.Stats(START)
+        st.disconnected("trade", START + 1000, "ConnectionClosedError:1006")
+        _trade(st, 1, START + 2000, recv=START + 2500)
+        self.assertEqual(st.events[0]["gap_ms"], 1500)
+        self.assertEqual(st.events[0]["reason"], "ConnectionClosedError:1006")
+        self.assertEqual(st.pending, {})
+
+    def test_compare_only_one_side_and_coverage(self):
+        a, b = p0.Stats(START), p0.Stats(START)
+        end = START + 120_000
+        t = START + 60_000
+        for st in (a, b):
+            _trade(st, 1, t)  # 둘 다 받음
+        a.disconnected("trade", t + 1000, "forced")  # A만 일부러 끊김
+        _trade(b, 2, t + 1500)  # A가 끊긴 동안 B만 받음
+        _trade(a, 3, t + 4000)  # A 다시 붙음
+        _trade(b, 3, t + 4000)
+        _trade(a, 9, START + 1000)  # 앞 10초 여유 구간이라 세지 않음
+        b.disconnected("orderbook", t + 30_000, "ConnectionClosedError")
+        a.disconnected("orderbook", t + 35_000, "ConnectionClosedError")
+        r = p0.compare(a, b, START, end)
+        self.assertEqual(r["trades_both"], 2)
+        self.assertEqual(r["trades_only_a"], 0)
+        self.assertEqual(r["trades_only_b"], 1)
+        self.assertEqual(r["trades_covered_by_b_during_a_gaps"], 1)
+        self.assertEqual(r["spontaneous_a"], 1)  # forced는 빼고 셈
+        self.assertEqual(r["spontaneous_a_overlapping_b_10s"], 1)  # 5초 차이로 겹침
+
+
 if __name__ == "__main__":
     unittest.main()
