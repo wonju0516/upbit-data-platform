@@ -6,6 +6,8 @@ Kafka·Spark 없이 Python만 쓴다 (docs/07_단계별실행계획.md 0단계, 
     .venv/bin/python ingest/p0_profile.py --seconds 1800 --drop-at 900
     .venv/bin/python ingest/p0_profile.py --seconds 7200 --collectors 2 --drop-at 3600
     .venv/bin/python ingest/p0_profile.py --seconds 3600 --collectors 2 --silence-sec 5
+    .venv/bin/python ingest/p0_profile.py --seconds 21600 --collectors 2 --silence-sec 5 \
+        --stop-after-event-min 10
 
 - 원본: data/p0/<UTC 시각>/<종류>.tsv.gz  (한 줄 = 받은 시각 ms, 탭, 받은 JSON 그대로). git 밖.
   --collectors 2면 수집기 A·B가 각자 연결 3개로 같은 것을 받고 a/, b/ 아래에 따로 저장한다.
@@ -89,10 +91,10 @@ class Stats:
         self.trade_minutes: dict[str, set[int]] = defaultdict(set)
         self.bad = 0
 
-    def disconnected(self, kind: str, t_ms: int, reason: str) -> None:
+    def disconnected(self, kind: str, t_ms: int, reason: str, ip: str | None = None) -> None:
         """끊긴 시각과 이유를 남긴다. 빈틈(gap_ms)은 다시 붙은 뒤 첫 메시지에서 채운다."""
         self.disconnects[kind] += 1
-        ev = {"kind": kind, "t_ms": t_ms, "reason": reason, "gap_ms": None}
+        ev = {"kind": kind, "t_ms": t_ms, "reason": reason, "gap_ms": None, "ip": ip}
         self.events.append(ev)
         self.pending[kind] = ev
 
@@ -285,22 +287,82 @@ class _ConnectLimiter:
             self.next_at = max(now, self.next_at) + self.gap_s
 
 
-async def collect(kind, codes, stats, deadline, drop_at, f, limiter, silence_s=None):
+def ntp_offset_ms(t1: float, t2: float, t3: float, t4: float) -> float:
+    """SNTP 시계 차이 (서버 − 내 시계, ms). t1·t4는 내 시계로 보낸·받은 시각, t2·t3은 서버 시각.
+
+    음수면 내 시계가 빠르다. 실제 지연 = 잰 지연 + 이 값.
+    """
+    return ((t2 - t1) + (t3 - t4)) / 2 * 1000
+
+
+def sntp_offset_ms(host: str = "time.google.com", timeout: float = 2.0) -> float | None:
+    """time.google.com에 SNTP 요청 한 번으로 시계 차이를 잰다. 실패하면 None."""
+    import socket
+    import struct
+
+    def ts(b: bytes) -> float:
+        sec, frac = struct.unpack("!II", b)
+        return sec - 2208988800 + frac / 2**32
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            t1 = time.time()
+            s.sendto(b"\x1b" + b"\0" * 47, (host, 123))
+            data, _ = s.recvfrom(48)
+            t4 = time.time()
+    except OSError:
+        return None
+    return round(ntp_offset_ms(t1, ts(data[32:40]), ts(data[40:48]), t4), 1)
+
+
+class _RunState:
+    """모든 연결이 함께 보는 종료 시각. --stop-after-event-min이면 첫 끊김 뒤로 당겨진다."""
+
+    def __init__(self, deadline: float, stop_after_s: float | None):
+        self.deadline = deadline
+        self.stop_after_s = stop_after_s
+        self.first_event_at: float | None = None
+
+    def on_event(self, reason: str) -> None:
+        if reason == "forced" or self.stop_after_s is None or self.first_event_at is not None:
+            return
+        self.first_event_at = time.monotonic()
+        self.deadline = min(self.deadline, self.first_event_at + self.stop_after_s)
+
+
+def _kst() -> str:
+    return dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%H:%M:%S")
+
+
+async def clock_sampler(state: _RunState, out: list, every_s: float = 600) -> None:
+    """every_s마다 시계 차이를 재서 out에 (내 시각 ms, 차이 ms)로 남긴다."""
+    while time.monotonic() < state.deadline:
+        off = await asyncio.to_thread(sntp_offset_ms)
+        out.append((time.time_ns() // 1_000_000, off))
+        until = time.monotonic() + every_s
+        while time.monotonic() < min(until, state.deadline):
+            await asyncio.sleep(1)
+
+
+async def collect(name, kind, codes, stats, state, drop_at, f, limiter, silence_s=None):
     from websockets.asyncio.client import connect
     from websockets.exceptions import WebSocketException
 
     backoff = 1.0
     dropped = drop_at is None
-    while time.monotonic() < deadline:
+    ip = None
+    while time.monotonic() < state.deadline:
         await limiter.wait()
         try:
             async with connect(WS_URL, max_size=2**22, open_timeout=10, close_timeout=2) as ws:
+                ip = (ws.remote_address or [None])[0]
                 await ws.send(subscribe_message(kind, codes, str(uuid.uuid4())))
                 backoff = 1.0
                 last = time.monotonic()
                 while True:
                     now = time.monotonic()
-                    if now >= deadline:
+                    if now >= state.deadline:
                         return
                     if silence_s is not None and now - last > silence_s:
                         raise _Silence()
@@ -324,8 +386,9 @@ async def collect(kind, codes, stats, deadline, drop_at, f, limiter, silence_s=N
             else:
                 code = getattr(getattr(e, "rcvd", None), "code", None)
                 reason = type(e).__name__ + (f":{code}" if code is not None else "")
-            stats.disconnected(kind, time.time_ns() // 1_000_000, reason)
-            print(f"[{kind}] 끊김: {reason}, {backoff:.0f}초 뒤 재연결", flush=True)
+            stats.disconnected(kind, time.time_ns() // 1_000_000, reason, ip)
+            state.on_event(reason)
+            print(f"[{_kst()} {name}/{kind}] 끊김: {reason} ip={ip}", flush=True)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
 
@@ -336,6 +399,7 @@ async def run(
     out_dir: Path,
     collectors: int = 1,
     silence_s: float | None = None,
+    stop_after_s: float | None = None,
 ) -> tuple[dict, dict]:
     codes, clock_offset = fetch_markets()
     print(
@@ -349,17 +413,20 @@ async def run(
     start_ms = time.time_ns() // 1_000_000
     stats = {n: Stats(start_ms) for n in names}
     t0 = time.monotonic()
-    deadline = t0 + seconds
+    state = _RunState(t0 + seconds, stop_after_s)
     drop_at = t0 + drop_at_s if drop_at_s is not None else None
     limiter = _ConnectLimiter(CONNECT_GAP_S)
+    offsets: list[tuple[int, float | None]] = []
     try:
         await asyncio.gather(
+            clock_sampler(state, offsets),
             *(
                 collect(
+                    n,
                     k,
                     codes,
                     stats[n],
-                    deadline,
+                    state,
                     drop_at if n == "a" else None,
                     gz[n, k],
                     limiter,
@@ -367,13 +434,13 @@ async def run(
                 )
                 for n in names
                 for k in TYPES
-            )
+            ),
         )
     finally:
         for f in gz.values():
             f.close()
-    # 받는 것은 deadline까지만이므로 비율은 설정한 길이로 나눈다 (닫는 대기 시간 제외).
-    end_ms = start_ms + seconds * 1000
+    # 받는 것은 deadline까지만이므로 비율은 실제 측정 길이로 나눈다 (닫는 대기 시간 제외).
+    end_ms = start_ms + int((state.deadline - t0) * 1000)
 
     def one(n: str) -> dict:
         gz_bytes = {k: (dirs[n] / f"{k}.tsv.gz").stat().st_size for k in TYPES}
@@ -386,6 +453,18 @@ async def run(
         metrics["compare"] = compare(stats["a"], stats["b"], start_ms, end_ms)
         metrics["markets_subscribed"] = len(codes)
     metrics["clock_offset_s_approx"] = clock_offset
+    good = [o for _, o in offsets if o is not None]
+    metrics["clock_offsets_ms"] = offsets
+    if good:
+        corr = percentile(good, 50)
+        metrics["latency_correction_ms"] = corr
+        for m in [metrics] if collectors == 1 else [metrics[n] for n in names]:
+            for k in TYPES:
+                for q in (50, 99):
+                    v = m.get(f"{k}_latency_ms_p{q}")
+                    m[f"{k}_latency_ms_p{q}_corrected"] = None if v is None else round(v + corr)
+    if state.first_event_at is not None:
+        metrics["stopped_after_first_event_s"] = round(state.first_event_at - t0)
     info = {"codes": codes, "start_ms": start_ms, "end_ms": end_ms}
     return metrics, info
 
@@ -400,6 +479,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--silence-sec", type=float, default=None, help="이 초 동안 메시지가 없으면 끊고 다시 연결"
     )
+    ap.add_argument(
+        "--stop-after-event-min",
+        type=float,
+        default=None,
+        help="업비트 쪽 첫 끊김(또는 침묵) 뒤 이 분이 지나면 끝냄 (--seconds는 최대 길이)",
+    )
     ap.add_argument("--no-ledger", action="store_true", help="원장에 쓰지 않음 (동작 확인용)")
     a = ap.parse_args(argv)
     if a.drop_at is not None and not 0 < a.drop_at < a.seconds:
@@ -407,7 +492,16 @@ def main(argv: list[str] | None = None) -> int:
 
     started = dt.datetime.now(dt.timezone.utc)
     out_dir = REPO / "data" / "p0" / started.strftime("%Y%m%d-%H%M%S")
-    metrics, info = asyncio.run(run(a.seconds, a.drop_at, out_dir, a.collectors, a.silence_sec))
+    metrics, info = asyncio.run(
+        run(
+            a.seconds,
+            a.drop_at,
+            out_dir,
+            a.collectors,
+            a.silence_sec,
+            a.stop_after_event_min * 60 if a.stop_after_event_min else None,
+        )
+    )
 
     per = [metrics] if a.collectors == 1 else [metrics["a"], metrics["b"]]
     ok = all(m[f"{k}_msgs"] > 0 for m in per for k in TYPES)
@@ -419,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         "format": "DEFAULT",
         "collectors": a.collectors,
         "silence_sec": a.silence_sec,
+        "stop_after_event_min": a.stop_after_event_min,
         "connect_gap_s": CONNECT_GAP_S,
     }
     manifest = out_dir / "manifest.json"
@@ -435,6 +530,11 @@ def main(argv: list[str] | None = None) -> int:
         f"{started:%Y-%m-%dT%H:%MZ}부터 {a.seconds}초"
         + (f", 수집기 {a.collectors}대 동시" if a.collectors > 1 else "")
         + (f", {a.silence_sec:g}초 침묵이면 재연결" if a.silence_sec else "")
+        + (
+            f", 첫 끊김 {a.stop_after_event_min:g}분 뒤 종료(실제 {metrics['seconds']}초)"
+            if a.stop_after_event_min
+            else ""
+        )
         + (f", {a.drop_at}초에 끊기" if a.drop_at is not None else "")
     )
     rid = ledger.append_run(

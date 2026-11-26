@@ -147,5 +147,26 @@ class SilenceTest(unittest.TestCase):
         self.assertEqual(r["orderbook_silent_s_both"], 3.0)
 
 
+class ClockAndStopTest(unittest.TestCase):
+    def test_ntp_offset_sign(self):
+        # 서버가 내 시계보다 0.3초 늦다 = 내 시계가 0.3초 빠름 → -300ms
+        self.assertAlmostEqual(p0.ntp_offset_ms(100.3, 100.01, 100.02, 100.33), -300.0)
+
+    def test_run_state_stops_after_first_real_event(self):
+        st = p0._RunState(deadline=1e12, stop_after_s=600)
+        st.on_event("forced")  # 일부러 끊은 것은 세지 않음
+        self.assertIsNone(st.first_event_at)
+        st.on_event("silence")
+        self.assertLessEqual(st.deadline, st.first_event_at + 600)
+        first = st.first_event_at
+        st.on_event("ConnectionClosedError")  # 두 번째부터는 바꾸지 않음
+        self.assertEqual(st.first_event_at, first)
+
+    def test_disconnect_keeps_ip(self):
+        st = p0.Stats(START)
+        st.disconnected("trade", START, "silence", "1.2.3.4")
+        self.assertEqual(st.events[0]["ip"], "1.2.3.4")
+
+
 if __name__ == "__main__":
     unittest.main()
