@@ -79,6 +79,7 @@
 
 ## 최근 변경
 
+- 2026-11-27 · Claude · 수집기를 Docker 컨테이너로(`docker/collector/Dockerfile`, compose `collector`, `restart: unless-stopped`, `init: true`), 멈춤 감시 60초, 공백에 `restart_cause`(CRASH/HANG/PLANNED). 컨테이너 스모크 PASS, T06(강제 종료 → 자동 재시작, 4초 공백 기록, 체결 572건 보충)·T18(데이터만 멈춤 → 10초 감지, pong으로 구분) 통과. **2026-11-27 09:19부터 `producer-a` 연속 수집 중** (개발용, 2주 시작 전 토픽 비움) · 09 2절, 06 1단계 시험 결과
 - 2026-11-26 · Claude · 1단계 수집기 `ingest/producer.py`(#7): 봉투로 Kafka 발행, 침묵 감지 10초, 끊김마다 공백 기록·업비트/우리 쪽 판정, 체결 REST 보충, Kafka 못 쓰면 파일 버퍼, 5분마다 마켓 목록. 스모크 테스트 `tests/scenarios/smoke_ingest.py` PASS(3분, 일부러 끊은 3.1초 공백 → LOCAL, REST 보충 196건). T19(브로커 2대 70초 정지): 버퍼 11,703건을 복구 후 다시 보내 받은 54,940건 = Kafka 54,940건, 유실 0·중복 0. 이때 중복 방지 발행기가 fatal 오류를 내는 문제를 찾아 새로 만들도록 고침 · 06 0절
 - 2026-11-26 · Claude · 공백 처리 원칙 확정 기록(09 2절), 04 명세에 봉투 `source`(REST 보충 구분), `silver_ingest_gap` 컬럼(연결·종류·종료 코드·ping 응답·복구 여부), ML 호가 나이·누락 표시 추가
 - 2026-11-26 · Claude · Kafka 4.3.2 3대(KRaft) 실행: 토픽 5개(3·3·3·1·1칸, 복제 3, min.insync 2, 3일, zstd), 체결 토픽 대표가 서버 3·1·2로 나뉨, `KRW-BTC` 키 5건이 같은 칸에 순서대로 쓰이고 다른 서버에서 읽힘(임시 토픽은 삭제), WSL에서 접속됨 · Docker Desktop은 사용자 화면 세션에서 켜야 함(09 9-1절)
