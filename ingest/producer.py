@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import datetime as dt
 import json
+import os
 import signal
 import sys
 import threading
@@ -147,6 +148,7 @@ def gap_record(
     probe_upbit_ok: bool | None = None,
     probe_external_ok: bool | None = None,
     reconnect_attempts: int = 1,
+    restart_cause: str | None = None,
     backfilled_trades: int | None = None,
 ) -> dict:
     """ops.ingest_gap 한 건 (04 4.5절 컬럼)."""
@@ -171,6 +173,7 @@ def gap_record(
         "recoverable": msg_type == "trade",
         "backfilled_trades": backfilled_trades,
         "reconnect_attempts": reconnect_attempts,
+        "restart_cause": restart_cause,
     }
 
 
@@ -421,9 +424,11 @@ class Collector:
         self.state_path = self.data / f"{a.producer_id}-state.json"
         self.pending: dict[str, dict] = {}  # kind → 아직 다시 받기 전인 공백
         self.dropped = a.drop_at is None
+        self.mute_done = a.mute_at is None  # T18: 체결 연결의 데이터를 한 번 버림
         self.t0 = time.monotonic()
         self.tasks: set[asyncio.Task] = set()
         self.received = 0  # WebSocket으로 받은 메시지 수 (유실 확인용)
+        self.beat = time.monotonic()  # 상태 저장이 돌 때마다 갱신 (감시용)
         self._restart_gaps()
 
     # --- 공백 ---
@@ -435,14 +440,17 @@ class Collector:
         except (OSError, ValueError):
             return
         reason = "PLANNED_STOP" if st.get("planned") else "PROCESS_RESTART"
+        # 끝나기 전에 이유를 남기지 못했으면(오류·강제 종료·정전) CRASH
+        cause = "PLANNED" if st.get("planned") else (st.get("cause") or "CRASH")
         for kind, t in (st.get("last_ms") or {}).items():
             if kind in TYPES and isinstance(t, int):
-                self.pending[kind] = {"reason": reason, "start": t, "attempts": 1}
-        log(f"지난 실행 기록 있음 → {reason} 공백 {sorted(self.pending)}")
+                self.pending[kind] = {"reason": reason, "cause": cause, "start": t, "attempts": 1}
+        log(f"지난 실행 기록 있음 → {reason}({cause}) 공백 {sorted(self.pending)}")
 
-    def save_state(self, planned: bool = False) -> None:
+    def save_state(self, planned: bool = False, cause: str | None = None) -> None:
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"last_ms": self.last_ms, "planned": planned}), encoding="utf-8")
+        st = {"last_ms": self.last_ms, "planned": planned, "cause": cause}
+        tmp.write_text(json.dumps(st), encoding="utf-8")
         tmp.replace(self.state_path)
 
     async def on_disconnect(self, kind: str, cid: str, ip: str | None, reason: str, **kw) -> None:
@@ -490,6 +498,7 @@ class Collector:
             probe_upbit_ok=g.get("up"),
             probe_external_ok=g.get("ext"),
             reconnect_attempts=g["attempts"],
+            restart_cause=g.get("cause"),
         )
         if kind == "trade":
             self._spawn(self.backfill(rec))
@@ -590,11 +599,15 @@ class Collector:
                             raw = await asyncio.wait_for(ws.recv(decode=False), timeout=1.0)
                         except asyncio.TimeoutError:
                             continue
+                        if self._muted(kind):
+                            continue  # T18: 연결은 그대로 두고 받은 것을 버려 침묵을 만든다
                         last = time.monotonic()
                         backoff = 1.0
                         self.on_message(kind, cid, raw)
                     return
             except _Silence as e:
+                if self._muted(kind):
+                    self.mute_done = True
                 await self.on_disconnect(kind, cid, ip, "SILENCE", pong=e.pong_ok)
             except _Drop:
                 await self.on_disconnect(kind, cid, ip, "FORCED")
@@ -610,6 +623,11 @@ class Collector:
                 await self.on_disconnect(kind, cid, ip, "ERROR", sent=repr(e)[:200])
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
+
+    def _muted(self, kind: str) -> bool:
+        return (
+            not self.mute_done and kind == "trade" and time.monotonic() - self.t0 >= self.a.mute_at
+        )
 
     async def _pong(self, ws) -> bool | None:
         """침묵 중 WebSocket ping을 보내 3초 안에 응답이 오는지 본다."""
@@ -683,12 +701,25 @@ class Collector:
                 return
             except asyncio.TimeoutError:
                 self.save_state()
+                self.beat = time.monotonic()
                 log_every = int(time.monotonic() - self.t0) % 600 < 5
                 if log_every:
                     log(
                         f"보냄 {self.sink.sent} 실패 {self.sink.failed} "
                         f"버퍼 누적 {self.sink.spool.count}"
                     )
+
+    def _watchdog(self, limit_s: float = 60.0) -> None:
+        """멈춤(먹통) 감시. Docker 재시작 정책은 프로세스가 끝나야 동작하므로 스스로 끝낸다."""
+        while not self.stop.is_set():
+            time.sleep(5)
+            if not self.stop.is_set() and time.monotonic() - self.beat > limit_s:
+                log(f"감시: {limit_s:.0f}초 넘게 멈춤 → 스스로 종료 (Docker가 다시 띄움)")
+                try:  # 다음 실행이 HANG으로 기록하게 남긴다
+                    self.save_state(cause="HANG")
+                except OSError:
+                    pass
+                os._exit(3)
 
     def _spawn(self, coro) -> None:
         t = asyncio.get_running_loop().create_task(coro)
@@ -701,6 +732,7 @@ class Collector:
             loop.add_signal_handler(s, self.stop.set)
         if self.a.seconds:
             loop.call_later(self.a.seconds, self.stop.set)
+        threading.Thread(target=self._watchdog, daemon=True).start()
         log(
             f"수집 시작: {self.a.producer_id}, KRW 마켓 {len(self.codes)}개, "
             f"침묵 {self.a.silence_sec}초"
@@ -724,6 +756,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--silence-sec", type=float, default=10.0, help="임시값 (이슈 #8)")
     ap.add_argument("--seconds", type=int, default=None, help="이 초 뒤 끝냄 (동작 확인용)")
     ap.add_argument("--drop-at", type=int, default=None, help="이 초에 체결 연결을 한 번 끊음")
+    ap.add_argument(
+        "--mute-at",
+        type=int,
+        default=None,
+        help="이 초부터 체결 연결로 오는 것을 버려 침묵을 만듦 (T18 시험용, 한 번)",
+    )
     ap.add_argument("--data-dir", default=str(REPO / "data" / "ingest"))
     a = ap.parse_args(argv)
 

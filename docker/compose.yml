@@ -6,6 +6,13 @@
 #
 # 컨테이너 안 주소: kafka-1:19092, kafka-2:19092, kafka-3:19092
 # PC(WSL) 쪽 주소:  localhost:29092, localhost:39092, localhost:49092
+#
+# 수집기(collector): 죽거나 PC가 다시 켜지면 자동으로 다시 뜸. 상태·버퍼는 data/ingest/ (git 밖)
+#   docker compose -f docker/compose.yml up -d --build collector
+#   docker compose -f docker/compose.yml logs -f collector
+# 주의: compose run collector 뒤에 인자를 주면 아래 command 전체가 그것으로 바뀐다.
+#   시험할 때는 --bootstrap=kafka-1:19092,kafka-2:19092,kafka-3:19092 를 꼭 함께 준다
+#   (2026-11-27 빠뜨려서 컨테이너 안 localhost로 Kafka를 찾다 못 씀, 데이터는 버퍼에 남음)
 
 x-kafka-image: &kafka-image apache/kafka:4.3.2@sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7
 
@@ -109,6 +116,37 @@ services:
     entrypoint: ["/bin/bash", "/scripts/create-topics.sh"]
     volumes: ["./kafka/create-topics.sh:/scripts/create-topics.sh:ro"]
     restart: "no"
+
+  collector:
+    build:
+      context: ..
+      dockerfile: docker/collector/Dockerfile
+    image: upbit-collector:local
+    container_name: upbit-collector
+    # 수집기가 1번 프로세스가 되지 않게 작은 init을 둠 (신호 전달, 죽은 프로세스 정리)
+    init: true
+    depends_on:
+      kafka-1: {condition: service_healthy}
+      kafka-2: {condition: service_healthy}
+      kafka-3: {condition: service_healthy}
+    command:
+      - --producer-id=producer-a
+      - --bootstrap=kafka-1:19092,kafka-2:19092,kafka-3:19092
+      - --data-dir=/app/data/ingest
+    volumes: ["../data/ingest:/app/data/ingest"]
+    # 종료 신호를 받으면 진행 중인 REST 보충을 마치고 계획 정지로 기록한다
+    stop_grace_period: 90s
+    healthcheck:
+      # 상태 파일이 5초마다 갱신된다. 30초 넘게 멈춰 있으면 비정상
+      test: ["CMD", "python", "-c", "import os,sys,time; p='/app/data/ingest/producer-a-state.json'; sys.exit(0 if time.time()-os.path.getmtime(p)<30 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    restart: unless-stopped
 
 volumes:
   kafka-1-data:

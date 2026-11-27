@@ -87,6 +87,11 @@ class GapRecordTest(unittest.TestCase):
         self.assertTrue(r["recoverable"])
         self.assertEqual(r["fault_side"], "UPBIT")
 
+    def test_restart_cause_kept(self):
+        r = pr.gap_record("p", None, "trade", 0, 1, "PROCESS_RESTART", restart_cause="HANG")
+        self.assertEqual(r["restart_cause"], "HANG")
+        self.assertIsNone(pr.gap_record("p", "c", "trade", 0, 1, "SILENCE")["restart_cause"])
+
     def test_orderbook_not_recoverable(self):
         r = pr.gap_record("p", "c", "orderbook", 0, 1, "PROCESS_RESTART")
         self.assertFalse(r["recoverable"])

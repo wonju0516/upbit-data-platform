@@ -1,6 +1,8 @@
 """수집기 스모크 테스트 (docs/06_신뢰성검증계획.md 0절). 고친 뒤마다 이것 하나만 돌린다.
 
     .venv/bin/python tests/scenarios/smoke_ingest.py            # 3분, 60초에 체결 연결을 끊음
+    .venv/bin/python tests/scenarios/smoke_ingest.py --check-only <producer_id> --data-dir <폴더>
+        # 수집기를 컨테이너 등 다른 곳에서 이미 돌렸을 때 Kafka 확인만
 
 1. 시험 전용 이름(producer-smoke-<시각>)과 폴더(data/ingest-smoke/)로 수집기를 돌린다.
    본 수집의 상태 파일·버퍼와 섞이지 않는다.
@@ -50,25 +52,30 @@ def main() -> int:
     ap.add_argument("--seconds", type=int, default=180)
     ap.add_argument("--drop-at", type=int, default=60)
     ap.add_argument("--bootstrap", default="localhost:29092")
+    ap.add_argument("--check-only", metavar="PRODUCER_ID", help="실행 없이 이 이름의 결과만 확인")
+    ap.add_argument("--data-dir", default=str(REPO / "data" / "ingest-smoke"))
     a = ap.parse_args()
 
-    pid = f"producer-smoke-{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%S}"
-    data = REPO / "data" / "ingest-smoke"
-    shutil.rmtree(data, ignore_errors=True)
-    cmd = [
-        sys.executable,
-        str(REPO / "ingest" / "producer.py"),
-        "--producer-id",
-        pid,
-        "--seconds",
-        str(a.seconds),
-        "--drop-at",
-        str(a.drop_at),
-        "--data-dir",
-        str(data),
-    ]
-    print("실행:", " ".join(cmd[1:]), flush=True)
-    proc = subprocess.run(cmd, timeout=a.seconds + 120)
+    data = Path(a.data_dir)
+    if a.check_only:
+        pid, returncode = a.check_only, 0
+    else:
+        pid = f"producer-smoke-{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%S}"
+        shutil.rmtree(data, ignore_errors=True)
+        cmd = [
+            sys.executable,
+            str(REPO / "ingest" / "producer.py"),
+            "--producer-id",
+            pid,
+            "--seconds",
+            str(a.seconds),
+            "--drop-at",
+            str(a.drop_at),
+            "--data-dir",
+            str(data),
+        ]
+        print("실행:", " ".join(cmd[1:]), flush=True)
+        returncode = subprocess.run(cmd, timeout=a.seconds + 120).returncode
 
     from confluent_kafka import Consumer
 
@@ -81,7 +88,7 @@ def main() -> int:
     trade_src = Counter(m["source"] for m in msgs["upbit.trade.raw"])
     forced = [g for g in gaps if g["reason"] == "FORCED"]
     checks = [
-        ("수집기 정상 종료", proc.returncode == 0),
+        ("수집기 정상 종료", returncode == 0),
         ("체결·호가·현재가 모두 받음", all(len(msgs[t]) > 0 for t in TOPICS[:3])),
         ("마켓 목록 발행", len(msgs["upbit.market.raw"]) > 0),
         ("일부러 끊은 공백 1건 기록", len(forced) == 1),

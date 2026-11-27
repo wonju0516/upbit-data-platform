@@ -1,0 +1,5 @@
+# 빌드에 필요한 파일만 보낸다 (data/ 같은 큰 폴더가 들어가지 않게)
+*
+!env/requirements.txt
+!ingest/*.py
+!tools/*.py
