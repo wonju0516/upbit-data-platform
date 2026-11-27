@@ -29,7 +29,7 @@
 ## 다음 할 일
 
 0. **수집기 연속 수집 중** (`producer-a`, 2026-11-27 09:19~). **2026-11-28 09:00 PC 예약 작업이 자동으로 멈춤** (계획 정지). 그 뒤 하루치 분석: `notes/01_day1_plan.md` (A 용량, B 침묵 기준 #8, C 끊김·물결 #6, D 공식 캔들 대조 → D7, E 지연, F 중복, G 자원). Kafka 보관은 3일이지만 **Bronze 잡이 2026-11-27 10:05부터 처음(오프셋 0)부터 저장 중**이라 Bronze에서 분석 가능
-1. Spark Bronze 잡 (#9): **실행 중, T07 통과.** 남은 것: 하루 디스크 사용량 실측(하루치 분석 A와 함께), 03 문서 메모리 표 갱신
+1. **HDFS + Spark 클러스터로 옮기기** (새 이슈, 만들기 전 사용자 확인). 순서는 09 3절 "HDFS·Spark 구축 순서": WSL 24GB(승인) → 이미지 고르기 → HDFS(NameNode 1, 논리 이름 `hdfs://upbit`) + Bronze 옮기기 → **부하 시험**(5배·10배 다시 넣기) → Spark 클러스터 → 부하 시험 → 스트리밍 앱 하나로 묶기 → T07·DataNode/worker 장애 시험. 붙일 때마다 메모리 실측. 그다음 Spark Bronze 잡 (#9): **실행 중, T07 통과.** 남은 것: 하루 디스크 사용량 실측(하루치 분석 A와 함께), 03 문서 메모리 표 갱신
 2. 12월 1일 Tardis 비교(09 D8)를 하려면 2026-11-30 밤에 수집기를 다시 켬
 3. 2주 운영 전: 침묵 기준 확정(#8), AWS 계정·S3 백업(사용자), 시험 메시지가 섞인 토픽 비우기, `data/p0` 삭제(확인 후), 모니터링(2단계)
 
@@ -80,6 +80,7 @@
 
 ## 최근 변경
 
+- 2026-11-27 · Claude · 결정 변경(사용자): 저장소 로컬 디스크 → **HDFS(NameNode 1 + DataNode 3, 복제 3)**, Spark local → **Standalone(master 1 + worker 2)**, 백업은 HDFS → S3(distcp). 메모리 예산을 컨테이너별 상한으로 고정(최대 21.9GB), **WSL 15→24GB 상향 필요(11-28 09시 뒤 승인)**. 2주 디스크 약 671GB · 09 3절, 03·08·10 문서, 그림
 - 2026-11-27 · Claude · Spark Bronze 잡(#9): `upbit-spark:local`(Spark 4.1.4 + Delta 4.4.1 + Kafka 커넥터, jar sha256 고정), compose `bronze`, 토픽 5개 → `data/lake/delta/bronze/`. 10:05부터 실행, Kafka에 남은 처음(오프셋 0)부터 저장. T07(드라이버 강제 종료 → 자동 재시작 → 체크포인트에서 이어서) 통과, 오프셋 연속성 검사 중복 0·빠짐 0. 메모리: Bronze 1.7GB, 수집기 43MB, Kafka 대당 1.2~1.5GB · 09 3절, 06 시험 결과
 - 2026-11-27 · Claude · 수집기를 Docker 컨테이너로(`docker/collector/Dockerfile`, compose `collector`, `restart: unless-stopped`, `init: true`), 멈춤 감시 60초, 공백에 `restart_cause`(CRASH/HANG/PLANNED). 컨테이너 스모크 PASS, T06(강제 종료 → 자동 재시작, 4초 공백 기록, 체결 572건 보충)·T18(데이터만 멈춤 → 10초 감지, pong으로 구분) 통과. **2026-11-27 09:19부터 `producer-a` 연속 수집 중** (개발용, 2주 시작 전 토픽 비움) · 09 2절, 06 1단계 시험 결과
 - 2026-11-26 · Claude · 1단계 수집기 `ingest/producer.py`(#7): 봉투로 Kafka 발행, 침묵 감지 10초, 끊김마다 공백 기록·업비트/우리 쪽 판정, 체결 REST 보충, Kafka 못 쓰면 파일 버퍼, 5분마다 마켓 목록. 스모크 테스트 `tests/scenarios/smoke_ingest.py` PASS(3분, 일부러 끊은 3.1초 공백 → LOCAL, REST 보충 196건). T19(브로커 2대 70초 정지): 버퍼 11,703건을 복구 후 다시 보내 받은 54,940건 = Kafka 54,940건, 유실 0·중복 0. 이때 중복 방지 발행기가 fatal 오류를 내는 문제를 찾아 새로 만들도록 고침 · 06 0절
