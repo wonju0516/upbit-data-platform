@@ -11,6 +11,7 @@
 | 빼고 볼 구간 | 09:19~09:25 (T06 강제 종료 시험으로 09:21에 한 번 재시작) |
 | 있는 곳 | Kafka 토픽 5개(`producer_id = producer-a`만), `data/ingest/producer-a-intervals.tsv`(10분 단위 간격), `docker logs upbit-collector` |
 | **기한** | Kafka 보관 3일이라 **2026-11-30 09시쯤부터 앞부분이 지워짐.** 그 전에 분석을 끝내거나, Bronze 잡(#9)을 `earliest`로 붙여 Bronze에 옮겨 둠 |
+| Bronze | 2026-11-27 10:05부터 Bronze 잡이 Kafka 오프셋 0부터 저장 중 (`data/lake/delta/bronze/`). Kafka에서 지워져도 Bronze에서 분석 가능 |
 
 ## 2. 비교할 것과 판단 기준
 
