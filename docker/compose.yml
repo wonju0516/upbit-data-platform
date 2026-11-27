@@ -10,6 +10,8 @@
 # 수집기(collector): 죽거나 PC가 다시 켜지면 자동으로 다시 뜸. 상태·버퍼는 data/ingest/ (git 밖)
 #   docker compose -f docker/compose.yml up -d --build collector
 #   docker compose -f docker/compose.yml logs -f collector
+# Bronze(bronze): Kafka → Delta(data/lake/delta/bronze/), 체크포인트는 data/lake/checkpoints/
+#   검사: docker exec upbit-bronze /opt/spark/bin/spark-submit --conf=spark.sql.extensions=... /app/pipelines/bronze_check.py
 # 주의: compose run collector 뒤에 인자를 주면 아래 command 전체가 그것으로 바뀐다.
 #   시험할 때는 --bootstrap=kafka-1:19092,kafka-2:19092,kafka-3:19092 를 꼭 함께 준다
 #   (2026-11-27 빠뜨려서 컨테이너 안 localhost로 Kafka를 찾다 못 씀, 데이터는 버퍼에 남음)
@@ -143,6 +145,37 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    restart: unless-stopped
+
+  bronze:
+    build:
+      context: ..
+      dockerfile: docker/spark/Dockerfile
+    image: upbit-spark:local
+    container_name: upbit-bronze
+    depends_on:
+      kafka-1: {condition: service_healthy}
+      kafka-2: {condition: service_healthy}
+      kafka-3: {condition: service_healthy}
+    # Spark 이미지는 java를 1번 프로세스로 바로 띄워 강제 종료 신호가 무시된다 → 작은 init을 둠
+    init: true
+    command:
+      - /opt/spark/bin/spark-submit
+      - --master=local[2]
+      - --driver-memory=3g
+      - --conf=spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
+      - --conf=spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog
+      - --conf=spark.sql.parquet.compression.codec=zstd
+      - --conf=spark.sql.session.timeZone=Asia/Seoul
+      - /app/pipelines/bronze_stream.py
+      - --bootstrap=kafka-1:19092,kafka-2:19092,kafka-3:19092
+      - --lake=/data
+    # Delta 테이블과 체크포인트 (git 밖)
+    volumes: ["../data/lake:/data"]
+    stop_grace_period: 60s
     logging:
       driver: json-file
       options: {max-size: "20m", max-file: "5"}

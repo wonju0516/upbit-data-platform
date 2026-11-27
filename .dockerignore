@@ -3,3 +3,4 @@
 !env/requirements.txt
 !ingest/*.py
 !tools/*.py
+!pipelines/*.py
